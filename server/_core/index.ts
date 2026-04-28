@@ -17,8 +17,7 @@ import { constructAndHandleWebhookEvent } from "../stripe";
 // Fail fast at startup rather than at runtime so Render surfaces the error
 // immediately in deployment logs instead of mysterious 500s in production.
 
-const REQUIRED_ENV_VARS = ["DATABASE_URL", "JWT_SECRET", "ODDS_API_KEY"];
-
+const REQUIRED_ENV_VARS = ["DATABASE_URL", "ODDS_API_KEY", "SUPABASE_JWT_SECRET"];
 for (const key of REQUIRED_ENV_VARS) {
   if (!process.env[key]) {
     console.error(`\n[FATAL] Missing required environment variable: ${key}`);
