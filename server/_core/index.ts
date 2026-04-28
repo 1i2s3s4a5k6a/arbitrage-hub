@@ -14,10 +14,9 @@ import { serveStatic, setupVite } from "./vite";
 import { constructAndHandleWebhookEvent } from "../stripe";
 
 // ── Required environment variable check ───────────────────────────────────
-// Fail fast at startup rather than at runtime so Render surfaces the error
-// immediately in deployment logs instead of mysterious 500s in production.
 
 const REQUIRED_ENV_VARS = ["DATABASE_URL", "ODDS_API_KEY", "SUPABASE_JWT_SECRET"];
+
 for (const key of REQUIRED_ENV_VARS) {
   if (!process.env[key]) {
     console.error(`\n[FATAL] Missing required environment variable: ${key}`);
@@ -72,11 +71,11 @@ async function startServer() {
               scriptSrc: ["'self'", "'unsafe-inline'", "https://js.stripe.com"],
               styleSrc: ["'self'", "'unsafe-inline'"],
               imgSrc: ["'self'", "data:", "https:"],
-              connectSrc: ["'self'", "https://api.stripe.com"],
+              connectSrc: ["'self'", "https://api.stripe.com", "https://*.supabase.co"],
               frameSrc: ["https://js.stripe.com", "https://hooks.stripe.com"],
             },
           }
-        : false, // relax CSP in development (Vite HMR needs it)
+        : false,
       crossOriginEmbedderPolicy: false,
     })
   );
@@ -94,7 +93,6 @@ async function startServer() {
   );
 
   // ── Stripe webhook MUST be registered before express.json() ──────────────
-  // Stripe signature verification requires the raw body as a Buffer.
   app.post(
     "/api/webhooks/stripe",
     express.raw({ type: "application/json" }),
@@ -104,7 +102,6 @@ async function startServer() {
         res.status(400).send("Missing stripe-signature header");
         return;
       }
-
       const result = await constructAndHandleWebhookEvent(req.body as Buffer, sig);
       res.status(result.success ? 200 : 400).json(result);
     }
@@ -115,7 +112,6 @@ async function startServer() {
   app.use(express.urlencoded({ limit: "10mb", extended: true }));
 
   // ── Rate limiting ─────────────────────────────────────────────────────────
-  // General API: 120 requests per 15 minutes per IP
   const generalLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 120,
@@ -125,7 +121,6 @@ async function startServer() {
   });
   app.use("/api/", generalLimiter);
 
-  // Auth endpoints: stricter limit to slow brute force
   const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 20,
