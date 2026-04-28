@@ -12,9 +12,14 @@ export default function Dashboard() {
   const dashboardQuery = trpc.dashboard.getDashboard.useQuery(undefined, {
     enabled: isAuthenticated,
   });
-  const oddsQuery = trpc.odds.getBestOdds.useQuery({ sport: "soccer_epl" });
-  const arbitrageQuery = trpc.arbitrage.getOpportunities.useQuery({ limit: 10 });
-
+  const oddsQuery = trpc.odds.getBestOdds.useQuery(
+  { sport: "soccer_epl" },
+  { enabled: isAuthenticated }
+);
+const arbitrageQuery = trpc.arbitrage.getOpportunities.useQuery(
+  { limit: 10 },
+  { enabled: isAuthenticated }
+);
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 flex items-center justify-center">

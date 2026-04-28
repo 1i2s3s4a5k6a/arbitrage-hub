@@ -65,17 +65,24 @@ async function startServer() {
   app.use(
     helmet({
       contentSecurityPolicy: isProduction
-        ? {
-            directives: {
-              defaultSrc: ["'self'"],
-              scriptSrc: ["'self'", "'unsafe-inline'", "https://js.stripe.com"],
-              styleSrc: ["'self'", "'unsafe-inline'"],
-              imgSrc: ["'self'", "data:", "https:"],
-              connectSrc: ["'self'", "https://api.stripe.com", "https://*.supabase.co"],
-              frameSrc: ["https://js.stripe.com", "https://hooks.stripe.com"],
-            },
-          }
-        : false,
+  ? {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'", "https://js.stripe.com"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+        fontSrc: ["'self'", "https://fonts.gstatic.com"],
+        imgSrc: ["'self'", "data:", "https:"],
+        connectSrc: [
+          "'self'",
+          "https://api.stripe.com",
+          `https://${process.env.VITE_SUPABASE_URL?.replace("https://", "") ?? ""}`,
+          "https://*.supabase.co",
+        ],
+        frameSrc: ["https://js.stripe.com", "https://hooks.stripe.com"],
+      },
+    }
+  : false,
+  
       crossOriginEmbedderPolicy: false,
     })
   );
