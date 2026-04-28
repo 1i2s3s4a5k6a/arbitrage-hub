@@ -23,13 +23,25 @@ export async function signInWithGitHub() {
   const { error } = await supabase.auth.signInWithOAuth({
     provider: "github",
     options: {
-      // After GitHub OAuth, Supabase redirects back here.
-      // Must be added to Supabase → Authentication → URL Configuration → Redirect URLs
       redirectTo: `${window.location.origin}`,
     },
   });
   if (error) {
     console.error("[Supabase] GitHub login error:", error.message);
+    throw error;
+  }
+}
+
+/** Trigger Google OAuth login via Supabase */
+export async function signInWithGoogle() {
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: "google",
+    options: {
+      redirectTo: `${window.location.origin}`,
+    },
+  });
+  if (error) {
+    console.error("[Supabase] Google login error:", error.message);
     throw error;
   }
 }
