@@ -4,6 +4,7 @@
  * elsewhere so missing variables are caught at startup (see index.ts).
  */
 export const ENV = {
+  // Legacy fields kept so existing imports don't break
   appId: process.env.VITE_APP_ID ?? "",
   cookieSecret: process.env.JWT_SECRET ?? "",
   databaseUrl: process.env.DATABASE_URL ?? "",
@@ -19,9 +20,12 @@ export const ENV = {
   // Stripe — https://dashboard.stripe.com/apikeys
   stripePublicKey: process.env.STRIPE_PUBLIC_KEY ?? "",
   stripeSecretKey: process.env.STRIPE_SECRET_KEY ?? "",
-  // Set this after creating a webhook in the Stripe dashboard
   stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? "",
 
   // Your deployed frontend origin (used for CORS + Stripe return URLs)
   frontendUrl: process.env.FRONTEND_URL ?? "https://arbitrage-hub.onrender.com",
+
+  // Supabase — https://supabase.com/dashboard → project → Settings → API
+  supabaseUrl: process.env.VITE_SUPABASE_URL ?? "",
+  supabaseJwtSecret: process.env.SUPABASE_JWT_SECRET ?? "",
 };

@@ -12,6 +12,11 @@ import {
   getUserSubscription,
   getAlertPreferences,
   getUnreadAlertsCount,
+  markAlertRead,
+  markAllAlertsRead,
+  upsertAlertPreferences,
+  placeBet,
+  getActiveStripeSubscriptionId,
 } from "./db";
 import {
   fetchLiveOdds,
@@ -22,7 +27,7 @@ import {
   calculate2WayArbitrage,
   calculate3WayArbitrage,
 } from "./arbitrage";
-import { getSubscriptionPlans, createCheckoutSession } from "./stripe";
+import { getSubscriptionPlans, createCheckoutSession, cancelSubscription } from "./stripe";
 
 export const appRouter = router({
   system: systemRouter,
@@ -249,6 +254,60 @@ export const appRouter = router({
         return { success: false, data: null };
       }
     }),
+
+    /**
+     * Mark a single alert as read.
+     * Scoped to the authenticated user — cannot mark another user's alerts.
+     */
+    markAsRead: protectedProcedure
+      .input(z.object({ alertId: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        try {
+          await markAlertRead(input.alertId, ctx.user.id);
+          return { success: true };
+        } catch (error) {
+          console.error("[Alerts] markAsRead error:", error);
+          return { success: false };
+        }
+      }),
+
+    /**
+     * Mark all of the authenticated user's alerts as read in one call.
+     */
+    markAllRead: protectedProcedure.mutation(async ({ ctx }) => {
+      try {
+        await markAllAlertsRead(ctx.user.id);
+        return { success: true };
+      } catch (error) {
+        console.error("[Alerts] markAllRead error:", error);
+        return { success: false };
+      }
+    }),
+
+    /**
+     * Create or update alert preferences.
+     * Every field is optional — only the fields you send are updated.
+     */
+    updatePreferences: protectedProcedure
+      .input(
+        z.object({
+          arbitrageAlerts:    z.boolean().optional(),
+          oddsChangeAlerts:   z.boolean().optional(),
+          matchUpdateAlerts:  z.boolean().optional(),
+          emailNotifications: z.boolean().optional(),
+          pushNotifications:  z.boolean().optional(),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        try {
+          await upsertAlertPreferences(ctx.user.id, input);
+          const updated = await getAlertPreferences(ctx.user.id);
+          return { success: true, data: updated };
+        } catch (error) {
+          console.error("[Alerts] updatePreferences error:", error);
+          return { success: false, data: null };
+        }
+      }),
   }),
 
   subscription: router({
@@ -288,7 +347,117 @@ export const appRouter = router({
           return { success: false, url: null };
         }
       }),
+
+    /**
+     * Cancel the authenticated user's active Stripe subscription.
+     * Cancels at period end so the user keeps access until the billing
+     * cycle expires — Stripe fires customer.subscription.deleted when
+     * the period ends, which our webhook handles to update the DB.
+     */
+    cancel: protectedProcedure.mutation(async ({ ctx }) => {
+      try {
+        const stripeSubId = await getActiveStripeSubscriptionId(ctx.user.id);
+
+        if (!stripeSubId) {
+          return { success: false, error: "No active subscription found" };
+        }
+
+        const cancelled = await cancelSubscription(stripeSubId);
+        if (!cancelled) {
+          return { success: false, error: "Failed to cancel subscription with Stripe" };
+        }
+
+        return {
+          success: true,
+          message: "Subscription will cancel at the end of the current billing period",
+        };
+      } catch (error) {
+        console.error("[Subscription] cancel error:", error);
+        return { success: false, error: "Cancellation failed" };
+      }
+    }),
+  }),
+  /**
+   * Bets router — place and retrieve bets.
+   * All endpoints are protected (require login).
+   */
+  bets: router({
+    /**
+     * Place a new bet and record it in the database.
+     *
+     * ArbitrageHub doesn't connect to bookmaker accounts directly —
+     * this records a bet the user has manually placed so their P&L
+     * and history are tracked in the dashboard.
+     *
+     * Validation:
+     *  - odds must be ≥ 1.01 (minimum meaningful decimal odds)
+     *  - stake is clamped to $1 – $1,000,000
+     *  - bookmaker and market are capped at 100 chars to prevent
+     *    oversized strings reaching the DB
+     */
+    place: protectedProcedure
+      .input(
+        z.object({
+          matchId:   z.string().min(1).max(255),
+          bookmaker: z.string().min(1).max(100),
+          market:    z.string().min(1).max(100),
+          option:    z.string().min(1).max(100),
+          odds:      z.number().min(1.01).max(10_000),
+          stake:     z.number().positive().min(1).max(1_000_000),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        try {
+          const bet = await placeBet({
+            userId:    ctx.user.id,
+            matchId:   input.matchId,
+            bookmaker: input.bookmaker,
+            market:    input.market,
+            option:    input.option,
+            odds:      input.odds,
+            stake:     input.stake,
+          });
+
+          if (!bet) return { success: false, data: null };
+          return { success: true, data: bet };
+        } catch (error) {
+          console.error("[Bets] place error:", error);
+          return { success: false, data: null };
+        }
+      }),
+
+    /**
+     * Return the authenticated user's bet history with pagination.
+     * Results are ordered newest-first.
+     */
+    getHistory: protectedProcedure
+      .input(
+        z.object({
+          limit:  z.number().int().positive().max(500).default(50),
+          offset: z.number().int().min(0).default(0),
+        })
+      )
+      .query(async ({ ctx, input }) => {
+        try {
+          // getUserBets already orders by placedAt DESC
+          const all = await getUserBets(ctx.user.id, input.limit + input.offset);
+          const page = all.slice(input.offset, input.offset + input.limit);
+          const hasMore = all.length > input.offset + input.limit;
+
+          return {
+            success: true,
+            data: page,
+            pagination: {
+              limit:   input.limit,
+              offset:  input.offset,
+              hasMore,
+            },
+          };
+        } catch (error) {
+          console.error("[Bets] getHistory error:", error);
+          return { success: false, data: [], pagination: { limit: input.limit, offset: input.offset, hasMore: false } };
+        }
+      }),
   }),
 });
-
 export type AppRouter = typeof appRouter;

@@ -8,9 +8,9 @@ import {
   bets,
   odds,
   oddsHistory,
+  alertPreferences,
   arbitrageOpportunities,
   alerts,
-  alertPreferences,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
@@ -290,6 +290,173 @@ export async function getUserStats(userId: number) {
     totalProfit,
     averageProfit: totalBets > 0 ? totalProfit / totalBets : 0,
   };
+}
+
+// ── Alert mutations ────────────────────────────────────────────────────────
+
+/**
+ * Mark a single alert as read.
+ * The userId check ensures users can only mark their own alerts.
+ */
+export async function markAlertRead(
+  alertId: number,
+  userId: number
+): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+
+  const result = await db
+    .update(alerts)
+    .set({ isRead: true })
+    .where(and(eq(alerts.id, alertId), eq(alerts.userId, userId)));
+
+  return true;
+}
+
+/**
+ * Mark all of a user's alerts as read in one query.
+ */
+export async function markAllAlertsRead(userId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+
+  await db
+    .update(alerts)
+    .set({ isRead: true })
+    .where(and(eq(alerts.userId, userId), eq(alerts.isRead, false)));
+}
+
+/**
+ * Upsert alert preferences — creates a row if none exists yet.
+ */
+export async function upsertAlertPreferences(
+  userId: number,
+  prefs: {
+    arbitrageAlerts?: boolean;
+    oddsChangeAlerts?: boolean;
+    matchUpdateAlerts?: boolean;
+    emailNotifications?: boolean;
+    pushNotifications?: boolean;
+  }
+): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+
+  const now = new Date();
+
+  await db
+    .insert(alertPreferences)
+    .values({
+      userId,
+      arbitrageAlerts: prefs.arbitrageAlerts ?? true,
+      oddsChangeAlerts: prefs.oddsChangeAlerts ?? true,
+      matchUpdateAlerts: prefs.matchUpdateAlerts ?? true,
+      emailNotifications: prefs.emailNotifications ?? false,
+      pushNotifications: prefs.pushNotifications ?? true,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: alertPreferences.userId,
+      set: {
+        ...(prefs.arbitrageAlerts !== undefined && { arbitrageAlerts: prefs.arbitrageAlerts }),
+        ...(prefs.oddsChangeAlerts !== undefined && { oddsChangeAlerts: prefs.oddsChangeAlerts }),
+        ...(prefs.matchUpdateAlerts !== undefined && { matchUpdateAlerts: prefs.matchUpdateAlerts }),
+        ...(prefs.emailNotifications !== undefined && { emailNotifications: prefs.emailNotifications }),
+        ...(prefs.pushNotifications !== undefined && { pushNotifications: prefs.pushNotifications }),
+        updatedAt: now,
+      },
+    });
+}
+
+// ── Bet mutations ──────────────────────────────────────────────────────────
+
+export type PlaceBetInput = {
+  userId: number;
+  matchId: string;
+  bookmaker: string;
+  market: string;
+  option: string;
+  odds: number;
+  stake: number;
+};
+
+/**
+ * Record a new bet. Returns the created bet row.
+ */
+export async function placeBet(
+  input: PlaceBetInput
+): Promise<typeof bets.$inferSelect | null> {
+  const db = await getDb();
+  if (!db) return null;
+
+  const now = new Date();
+
+  const [created] = await db
+    .insert(bets)
+    .values({
+      userId: input.userId,
+      matchId: input.matchId,
+      bookmaker: input.bookmaker,
+      market: input.market,
+      outcome: "pending",
+      odds: String(input.odds),
+      stake: String(input.stake),
+      profit: null,
+      roiPercentage: null,
+      placedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning();
+
+  return created ?? null;
+}
+
+/**
+ * Fetch a single bet by ID, scoped to the requesting user.
+ */
+export async function getUserBetById(
+  betId: number,
+  userId: number
+): Promise<typeof bets.$inferSelect | null> {
+  const db = await getDb();
+  if (!db) return null;
+
+  const result = await db
+    .select()
+    .from(bets)
+    .where(and(eq(bets.id, betId), eq(bets.userId, userId)))
+    .limit(1);
+
+  return result[0] ?? null;
+}
+
+// ── Subscription cancel helper ─────────────────────────────────────────────
+
+/**
+ * Look up the active Stripe subscription ID for a user so the router
+ * can pass it to stripe.cancelSubscription().
+ */
+export async function getActiveStripeSubscriptionId(
+  userId: number
+): Promise<string | null> {
+  const db = await getDb();
+  if (!db) return null;
+
+  const result = await db
+    .select({ stripeSubscriptionId: subscriptions.stripeSubscriptionId })
+    .from(subscriptions)
+    .where(
+      and(
+        eq(subscriptions.userId, userId),
+        eq(subscriptions.status, "active")
+      )
+    )
+    .orderBy(desc(subscriptions.createdAt))
+    .limit(1);
+
+  return result[0]?.stripeSubscriptionId ?? null;
 }
 
 // ── Stripe helpers (called from webhook handler) ───────────────────────────

@@ -1,12 +1,12 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { getLoginUrl } from "@/const";
+import { signInWithGitHub } from "@/lib/supabase";
 import { useLocation } from "wouter";
 import { TrendingUp, Zap, Shield, BarChart3 } from "lucide-react";
 
 export default function Home() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, loading } = useAuth();
   const [, navigate] = useLocation();
 
   if (isAuthenticated) {
@@ -20,9 +20,13 @@ export default function Home() {
       <nav className="border-b border-slate-800 bg-slate-900/50 backdrop-blur">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="text-2xl font-bold text-white">ArbitrageHub</div>
-          <a href={getLoginUrl()} className="text-slate-300 hover:text-white transition">
-            <Button className="bg-blue-600 hover:bg-blue-700">Sign In</Button>
-          </a>
+          <Button
+            className="bg-blue-600 hover:bg-blue-700"
+            disabled={loading}
+            onClick={signInWithGitHub}
+          >
+            Sign In with GitHub
+          </Button>
         </div>
       </nav>
 
@@ -30,16 +34,23 @@ export default function Home() {
       <section className="max-w-7xl mx-auto px-6 py-20">
         <div className="text-center mb-16">
           <h1 className="text-5xl md:text-6xl font-bold text-white mb-6 leading-tight">
-            Real-Time Sports <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-green-400">Arbitrage Intelligence</span>
+            Real-Time Sports{" "}
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-green-400">
+              Arbitrage Intelligence
+            </span>
           </h1>
           <p className="text-xl text-slate-400 mb-8 max-w-2xl mx-auto">
-            Detect profitable betting opportunities across 50+ bookmakers in real-time. Powered by AI-driven analysis and advanced algorithms.
+            Detect profitable betting opportunities across 50+ bookmakers in real-time. Powered by
+            AI-driven analysis and advanced algorithms.
           </p>
-          <a href={getLoginUrl()}>
-            <Button size="lg" className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-6 text-lg">
-              Get Started Free
-            </Button>
-          </a>
+          <Button
+            size="lg"
+            className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-6 text-lg"
+            disabled={loading}
+            onClick={signInWithGitHub}
+          >
+            Get Started Free
+          </Button>
         </div>
       </section>
 
@@ -113,11 +124,18 @@ export default function Home() {
           ].map((plan) => (
             <Card
               key={plan.name}
-              className={`${plan.highlighted ? "bg-blue-900 border-blue-600 ring-2 ring-blue-500" : "bg-slate-900 border-slate-700"} transition`}
+              className={`${
+                plan.highlighted
+                  ? "bg-blue-900 border-blue-600 ring-2 ring-blue-500"
+                  : "bg-slate-900 border-slate-700"
+              } transition`}
             >
               <CardHeader>
                 <CardTitle className="text-white">{plan.name}</CardTitle>
-                <div className="text-3xl font-bold text-white mt-2">{plan.price}<span className="text-lg text-slate-400">/mo</span></div>
+                <div className="text-3xl font-bold text-white mt-2">
+                  {plan.price}
+                  <span className="text-lg text-slate-400">/mo</span>
+                </div>
               </CardHeader>
               <CardContent>
                 <ul className="space-y-2">
@@ -137,12 +155,17 @@ export default function Home() {
       {/* CTA Section */}
       <section className="max-w-7xl mx-auto px-6 py-16 text-center">
         <h2 className="text-3xl font-bold text-white mb-6">Ready to Start Arbitrage Trading?</h2>
-        <p className="text-slate-400 mb-8 text-lg">Join thousands of bettors using ArbitrageHub to find profitable opportunities</p>
-        <a href={getLoginUrl()}>
-          <Button size="lg" className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-6 text-lg">
-            Sign Up Now
-          </Button>
-        </a>
+        <p className="text-slate-400 mb-8 text-lg">
+          Join thousands of bettors using ArbitrageHub to find profitable opportunities
+        </p>
+        <Button
+          size="lg"
+          className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-6 text-lg"
+          disabled={loading}
+          onClick={signInWithGitHub}
+        >
+          Sign Up Now
+        </Button>
       </section>
 
       {/* Footer */}

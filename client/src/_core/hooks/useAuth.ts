@@ -1,80 +1,67 @@
-import { getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
-import { TRPCClientError } from "@trpc/client";
-import { useCallback, useEffect, useMemo } from "react";
+import { signOut, supabase } from "@/lib/supabase";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { Session } from "@supabase/supabase-js";
 
 type UseAuthOptions = {
   redirectOnUnauthenticated?: boolean;
-  redirectPath?: string;
 };
 
 export function useAuth(options?: UseAuthOptions) {
-  const { redirectOnUnauthenticated = false, redirectPath = getLoginUrl() } =
-    options ?? {};
+  const { redirectOnUnauthenticated = false } = options ?? {};
   const utils = trpc.useUtils();
 
+  // Track the Supabase session so we know immediately whether the user
+  // is logged in — before the trpc.auth.me query even resolves.
+  const [session, setSession] = useState<Session | null | undefined>(undefined);
+
+  useEffect(() => {
+    // Hydrate the session from localStorage on first render
+    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+
+    // Keep session in sync when the user logs in/out or the token refreshes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (_event, newSession) => {
+        setSession(newSession);
+        // Invalidate the trpc.auth.me cache so the backend re-reads user data
+        utils.auth.me.invalidate();
+      }
+    );
+    return () => subscription.unsubscribe();
+  }, [utils]);
+
+  // Full user record (subscription tier, role, etc.) comes from our DB
   const meQuery = trpc.auth.me.useQuery(undefined, {
+    enabled: Boolean(session),   // only fetch when logged in
     retry: false,
     refetchOnWindowFocus: false,
   });
 
-  const logoutMutation = trpc.auth.logout.useMutation({
-    onSuccess: () => {
-      utils.auth.me.setData(undefined, null);
-    },
-  });
-
   const logout = useCallback(async () => {
-    try {
-      await logoutMutation.mutateAsync();
-    } catch (error: unknown) {
-      if (
-        error instanceof TRPCClientError &&
-        error.data?.code === "UNAUTHORIZED"
-      ) {
-        return;
-      }
-      throw error;
-    } finally {
-      utils.auth.me.setData(undefined, null);
-      await utils.auth.me.invalidate();
-    }
-  }, [logoutMutation, utils]);
+    await signOut();
+    utils.auth.me.setData(undefined, null);
+    await utils.auth.me.invalidate();
+  }, [utils]);
 
-  const state = useMemo(() => {
-    localStorage.setItem(
-      "manus-runtime-user-info",
-      JSON.stringify(meQuery.data)
-    );
-    return {
-      user: meQuery.data ?? null,
-      loading: meQuery.isLoading || logoutMutation.isPending,
-      error: meQuery.error ?? logoutMutation.error ?? null,
-      isAuthenticated: Boolean(meQuery.data),
-    };
-  }, [
-    meQuery.data,
-    meQuery.error,
-    meQuery.isLoading,
-    logoutMutation.error,
-    logoutMutation.isPending,
-  ]);
-
+  // Redirect to home if the user is not authenticated
   useEffect(() => {
     if (!redirectOnUnauthenticated) return;
-    if (meQuery.isLoading || logoutMutation.isPending) return;
-    if (state.user) return;
-    if (typeof window === "undefined") return;
-    if (window.location.pathname === redirectPath) return;
+    if (session === undefined) return; // still loading
+    if (session) return;              // logged in, no redirect needed
+    window.location.href = "/";
+  }, [redirectOnUnauthenticated, session]);
 
-    window.location.href = redirectPath
-  }, [
-    redirectOnUnauthenticated,
-    redirectPath,
-    logoutMutation.isPending,
-    meQuery.isLoading,
-    state.user,
-  ]);
+  const state = useMemo(() => ({
+    user: meQuery.data ?? null,
+    supabaseUser: session?.user ?? null,
+    // Loading is true until we know the session state AND (if logged in)
+    // the DB user has loaded
+    loading:
+      session === undefined ||
+      (Boolean(session) && meQuery.isLoading),
+    isAuthenticated: Boolean(session),
+    error: meQuery.error ?? null,
+  }), [session, meQuery.data, meQuery.isLoading, meQuery.error]);
 
   return {
     ...state,
