@@ -1,5 +1,5 @@
 import type { CreateExpressContextOptions } from "@trpc/server/adapters/express";
-import { jwtVerify } from "jose";
+import { createClient } from "@supabase/supabase-js";
 import type { User } from "../../drizzle/schema";
 import * as db from "../db";
 
@@ -10,13 +10,8 @@ export type TrpcContext = {
 };
 
 /**
- * Verify the Supabase JWT from the Authorization header.
- * Supabase signs tokens with HS256 using the JWT Secret from
- * Supabase → Settings → API → JWT Secret.
- *
- * On success: upserts the user into our DB (so new users are auto-created)
- * and returns the full user row.
- * On failure: returns null (request proceeds as unauthenticated).
+ * Verify the Supabase JWT using the Supabase admin client.
+ * This works for both HS256 and ES256 tokens automatically.
  */
 async function getUserFromRequest(
   req: CreateExpressContextOptions["req"]
@@ -25,39 +20,43 @@ async function getUserFromRequest(
   if (!authHeader?.startsWith("Bearer ")) return null;
 
   const token = authHeader.slice(7);
-  const jwtSecret = process.env.SUPABASE_JWT_SECRET;
 
-  if (!jwtSecret) {
-    console.warn("[Auth] SUPABASE_JWT_SECRET is not set — all requests will be unauthenticated");
+  const supabaseUrl = process.env.VITE_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !serviceRoleKey) {
+    console.warn("[Auth] VITE_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY not set");
     return null;
   }
 
   try {
-    const secret = new TextEncoder().encode(jwtSecret);
-    const { payload } = await jwtVerify(token, secret);
+    // Use the service role client to verify the user token
+    const supabase = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
 
-    // Supabase JWT claims
-    const supabaseUserId = payload.sub as string;       // UUID
-    const email = payload.email as string | undefined;
+    const { data, error } = await supabase.auth.getUser(token);
+    if (error || !data.user) return null;
+
+    const supabaseUser = data.user;
+    const email = supabaseUser.email;
     const name =
-      (payload.user_metadata as any)?.full_name as string | undefined ??
-      (payload.user_metadata as any)?.name as string | undefined;
+      supabaseUser.user_metadata?.full_name ??
+      supabaseUser.user_metadata?.name ??
+      null;
 
-    if (!supabaseUserId) return null;
-
-    // Auto-create or update the user row in our DB on every request.
-    // This is safe — upsertUser only updates non-sensitive fields.
+    // Auto-create or update the user row in our DB
     await db.upsertUser({
-      openId: supabaseUserId,
-      name: name ?? null,
-      email: email ?? null,
-      loginMethod: "github",
+      openId: supabaseUser.id,
+      name,
+      email,
+      loginMethod: supabaseUser.app_metadata?.provider ?? "unknown",
       lastSignedIn: new Date(),
     });
 
-    return await db.getUserByOpenId(supabaseUserId) ?? null;
+    return (await db.getUserByOpenId(supabaseUser.id)) ?? null;
   } catch (err) {
-    // Token expired, invalid signature, etc. — treat as unauthenticated
+    console.error("[Auth] Token verification failed:", err);
     return null;
   }
 }
